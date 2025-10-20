@@ -1,7 +1,6 @@
-import { useAuth } from '@/context/AuthContext';
-import { useGoals } from '@/context/GoalsContext'; // ✅ เพิ่ม
+import { ThemedText } from '@/components/themed-text';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
     Alert,
     Animated,
@@ -14,8 +13,13 @@ import {
     Text,
     TextInput,
     View,
+    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter, useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '@/api/api'; //  1. Import api
+import { User } from '@/types/navigation'; //  2. Import User type
 
 /** ---------- สีธีม ---------- */
 const palette = {
@@ -121,125 +125,145 @@ function LabeledInput({
 
 /** ---------- หน้า Settings ---------- */
 export default function SettingsScreen() {
-  const [displayName, setDisplayName] = useState('นัททา ผู้ชอบอ่านหนังสือ');
-  const [backupCode, setBackupCode] = useState('');
+    const router = useRouter();
+    const [profile, setProfile] = useState<Partial<User>>({});
+    const [loading, setLoading] = useState(true);
+    
+    //  3. ดึงข้อมูลโปรไฟล์จาก API เมื่อเปิดหน้า
+    useFocusEffect(
+        useCallback(() => {
+            const fetchProfile = async () => {
+                setLoading(true);
+                try {
+                    const { data } = await api.get('/users/profile');
+                    setProfile(data);
+                } catch (error) {
+                    console.error('Failed to fetch profile', error);
+                    Alert.alert('ผิดพลาด', 'ไม่สามารถดึงข้อมูลโปรไฟล์ได้');
+                } finally {
+                    setLoading(false);
+                }
+            };
+            fetchProfile();
+        }, [])
+    );
 
-  // ✅ เป้าหมายจาก Context + state ของ input
-  const { monthlyGoal: savedMonthlyGoal, setMonthlyGoal } = useGoals();
-  const [monthlyGoal, setMonthlyGoalInput] = useState('');
+    //  4. ฟังก์ชันสำหรับบันทึกการเปลี่ยนแปลงทั้งหมด
+    const handleSaveProfile = async () => {
+        if (!profile.name?.trim()) {
+            Alert.alert('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อผู้ใช้');
+            return;
+        }
+        try {
+            await api.put('/users/profile', {
+                name: profile.name,
+                readingGoal: Number(profile.readingGoal) || 0,
+                // สามารถเพิ่ม field อื่นๆ ที่ต้องการบันทึกได้ที่นี่
+            });
+            Alert.alert('สำเร็จ', 'บันทึกข้อมูลโปรไฟล์เรียบร้อยแล้ว');
+        } catch (error) {
+            console.error('Failed to save profile', error);
+            Alert.alert('ผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้');
+        }
+    };
 
-  const { signOut } = useAuth();
+    //  5. ฟังก์ชัน Logout
+    const handleLogout = () => {
+        Alert.alert('ออกจากระบบ', 'คุณต้องการออกจากระบบหรือไม่?', [
+            { text: 'ยกเลิก', style: 'cancel' },
+            { text: 'ออกจากระบบ', style: 'destructive', onPress: async () => {
+                await AsyncStorage.removeItem('userToken');
+                router.replace('/(auth)/login');
+            }},
+        ]);
+    };
 
-  // โหลดค่าเป้าหมายที่บันทึกไว้มาใส่ input ตอนเปิดหน้า
-  useEffect(() => {
-    if (savedMonthlyGoal != null) setMonthlyGoalInput(String(savedMonthlyGoal));
-  }, [savedMonthlyGoal]);
-
-  const handleLogout = () => {
-    Alert.alert('ออกจากระบบ', 'คุณต้องการออกจากระบบหรือไม่?', [
-      { text: 'ยกเลิก', style: 'cancel' },
-      { text: 'ออกจากระบบ', style: 'destructive', onPress: signOut },
-    ]);
-  };
-
-  // ✅ บันทึกเป้าหมายจริง
-  const handleSaveGoal = () => {
-    const n = parseInt((monthlyGoal || '').trim(), 10);
-    if (Number.isNaN(n) || n <= 0) {
-      Alert.alert('ค่าว่าง/ไม่ถูกต้อง', 'กรุณากรอกจำนวนเล่มเป็นตัวเลขมากกว่า 0');
-      return;
-    }
-    setMonthlyGoal(n); // -> GoalsContext จะ persist (เช่น AsyncStorage)
-    Alert.alert('สำเร็จ', `บันทึกเป้าหมายรายเดือน: ${n} เล่มแล้ว`);
-  };
-
-  const insets = useSafeAreaInsets();
-
-  return (
-    <View style={{ flex: 1, backgroundColor: palette.bg }}>
-      <StatusBar barStyle="dark-content" backgroundColor={palette.headerBar} />
-      <View style={[styles.topInsetFill, { height: insets.top }]} />
-
-      <SafeAreaView edges={['top']} style={{ backgroundColor: 'transparent' }}>
-        <View style={styles.headerWrap}>
-          <View style={[styles.headerBar, { paddingTop: insets.top ? 10 : 14 }]}>
-            <View style={styles.headerRow}>
-              <View style={styles.headerIconRound}>
-                <Ionicons name="settings-outline" size={18} color={palette.textStrong} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.headerTitle}>การตั้งค่า</Text>
-                <Text style={styles.headerSub}>ปรับแต่งบัญชีและเป้าหมายการอ่านของคุณ</Text>
-              </View>
+    const insets = useSafeAreaInsets();
+    
+    if (loading) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: palette.bg }}>
+                <ActivityIndicator size="large" color={palette.primary} />
             </View>
-          </View>
+        );
+    }
+
+    return (
+        <View style={{ flex: 1, backgroundColor: palette.bg }}>
+            <StatusBar barStyle="dark-content" backgroundColor={palette.headerBar} />
+            <View style={[styles.topInsetFill, { height: insets.top }]} />
+
+            <SafeAreaView edges={['top']} style={{ backgroundColor: 'transparent' }}>
+                <View style={styles.headerWrap}>
+                    <View style={[styles.headerBar, { paddingTop: insets.top ? 10 : 14 }]}>
+                        <View style={styles.headerRow}>
+                            <View style={styles.headerIconRound}>
+                                <Ionicons name="settings-outline" size={18} color={palette.textStrong} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.headerTitle}>การตั้งค่า</Text>
+                                <Text style={styles.headerSub}>ปรับแต่งบัญชีและเป้าหมายการอ่านของคุณ</Text>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </SafeAreaView>
+
+            <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.content}
+                bounces={false}
+                alwaysBounceVertical={false}
+                overScrollMode="never"
+                contentInsetAdjustmentBehavior="never"
+            >
+                <View style={styles.card}>
+                    {/* ผู้ใช้ */}
+                    <SectionTitle icon="person-circle-outline" title="การตั้งค่าผู้ใช้" />
+                    <Text style={styles.label}>เปลี่ยนชื่อผู้ใช้</Text>
+                    <LabeledInput
+                        icon="id-card-outline"
+                        placeholder="กรอกชื่อที่ต้องการแสดง"
+                        value={profile.name || ''}
+                        onChangeText={(text) => setProfile(p => ({ ...p, name: text }))}
+                    />
+                    
+                    <Divider />
+
+                    {/* เป้าหมายการอ่าน */}
+                    <SectionTitle icon="book-outline" title="เป้าหมายการอ่าน" />
+                    <Text style={styles.label}>
+                        เป้าหมายรายเดือน (จำนวนเล่ม)
+                    </Text>
+                    <LabeledInput
+                        icon="calendar-outline"
+                        placeholder="จำนวนเล่ม/เดือน"
+                        value={String(profile.readingGoal || '')}
+                        onChangeText={(text) => setProfile(p => ({ ...p, readingGoal: Number(text.replace(/[^0-9]/g, '')) }))}
+                        keyboardType="numeric"
+                    />
+                    
+                    <Divider />
+
+                    {/* ปุ่มบันทึกหลัก */}
+                    <AnimatedButton
+                        variant="success"
+                        icon="checkmark-circle-outline"
+                        label="บันทึกการเปลี่ยนแปลง"
+                        onPress={handleSaveProfile}
+                    />
+
+                    <Divider />
+
+                    {/* จัดการข้อมูล */}
+                    <SectionTitle icon="server-outline" title="จัดการข้อมูล" />
+                    <AnimatedButton variant="danger" icon="log-out-outline" label="ออกจากระบบ" onPress={handleLogout} />
+                </View>
+            </ScrollView>
         </View>
-      </SafeAreaView>
-
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
-        bounces={false}
-        alwaysBounceVertical={false}
-        overScrollMode="never"
-        contentInsetAdjustmentBehavior="never"
-      >
-        <View style={styles.card}>
-          {/* ผู้ใช้ */}
-          <SectionTitle icon="person-circle-outline" title="การตั้งค่าผู้ใช้" />
-          <Text style={styles.label}>เปลี่ยนชื่อผู้ใช้</Text>
-          <LabeledInput
-            icon="id-card-outline"
-            placeholder="กรอกชื่อที่ต้องการแสดง"
-            value={displayName}
-            onChangeText={setDisplayName}
-          />
-          <AnimatedButton variant="primary" icon="save-outline" label="บันทึกชื่อผู้ใช้" onPress={() => {}} />
-
-          <Divider />
-
-          {/* รหัสสำรอง */}
-          <SectionTitle icon="key-outline" title="รหัสสำรอง" />
-          <Text style={styles.label}>เพิ่มรหัสสำรอง (เช่น 4 ตัวอักษร)</Text>
-          <LabeledInput icon="lock-closed-outline" placeholder="เช่น AB12" value={backupCode} onChangeText={setBackupCode} />
-          <AnimatedButton variant="outline" icon="add-outline" label="เพิ่มรหัสสำรอง" onPress={() => {}} />
-
-          <Divider />
-
-          {/* เป้าหมายการอ่าน */}
-          <SectionTitle icon="book-outline" title="เป้าหมายการอ่าน" />
-          <Text style={styles.label}>
-            เป้าหมายรายเดือน (จำนวนเล่ม){' '}
-            {savedMonthlyGoal != null ? `• ปัจจุบัน: ${savedMonthlyGoal} เล่ม` : ''}
-          </Text>
-          <LabeledInput
-            icon="calendar-outline"
-            placeholder="จำนวนเล่ม/เดือน"
-            value={monthlyGoal}
-            onChangeText={setMonthlyGoalInput}
-            keyboardType="numeric"
-          />
-          <AnimatedButton
-            variant="success"
-            icon="checkmark-circle-outline"
-            label="บันทึกเป้าหมาย"
-            onPress={handleSaveGoal}
-          />
-
-          <Divider />
-
-          {/* จัดการข้อมูล */}
-          <SectionTitle icon="server-outline" title="จัดการข้อมูล" />
-          <View style={styles.rowButtons}>
-            <AnimatedButton variant="outline" icon="refresh-outline" label="รีเซ็ตสถิติ" onPress={() => {}} />
-            <AnimatedButton variant="danger" icon="trash-outline" label="ลบบัญชี" onPress={() => {}} />
-          </View>
-          <AnimatedButton variant="danger" icon="log-out-outline" label="ออกจากระบบ" onPress={handleLogout} />
-        </View>
-      </ScrollView>
-    </View>
-  );
+    );
 }
+
 
 /** ---------- ชิ้นส่วนย่อย ---------- */
 function SectionTitle({ icon, title }: { icon: keyof typeof Ionicons.glyphMap; title: string }) {
@@ -258,14 +282,12 @@ function Divider() {
 /** ---------- สไตล์รวม ---------- */
 const styles = StyleSheet.create({
   content: { padding: 16, gap: 14, paddingBottom: 28 },
-
   topInsetFill: {
     position: 'absolute',
     top: 0, left: 0, right: 0,
     backgroundColor: palette.headerBar,
     zIndex: 0,
   },
-
   headerWrap: {
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
@@ -277,7 +299,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
-
   headerBar: {
     backgroundColor: palette.headerBar,
     paddingHorizontal: 16,
@@ -290,7 +311,6 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 20, fontWeight: '900', color: palette.textStrong },
   headerSub: { color: palette.text, marginTop: 2 },
-
   card: {
     backgroundColor: palette.card,
     padding: 16,
@@ -301,20 +321,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 5,
   },
-
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 8 },
   sectionTitle: { fontWeight: '900', color: palette.textStrong },
   sectionLine: { flex: 1, height: 1, backgroundColor: palette.divider, marginLeft: 8, opacity: 0.7 },
-
   label: { color: palette.text, marginBottom: 6 },
-
   inputWrap: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, borderWidth: 1.5, marginBottom: 10 },
   inputField: { flex: 1, paddingVertical: 12, paddingRight: 12, color: palette.textStrong, fontWeight: '600' },
-
   divider: { height: 1, backgroundColor: palette.divider, marginVertical: 14, opacity: 0.6 },
-
   rowButtons: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-
   btnBase: {
     borderRadius: 12,
     paddingVertical: 12,

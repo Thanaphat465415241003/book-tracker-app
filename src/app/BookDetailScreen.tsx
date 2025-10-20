@@ -1,8 +1,7 @@
 import { ThemedText } from '@/components/themed-text';
-import { Colors } from '@/constants/theme';
 import { Book } from '@/types/navigation';
-import { useLocalSearchParams } from 'expo-router';
-import React, { useState } from 'react';
+import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router';
+import React, { useState, useCallback } from 'react';
 import {
   Alert,
   Platform,
@@ -10,63 +9,67 @@ import {
   StyleSheet,
   TouchableOpacity,
   View,
+  ActivityIndicator,
 } from 'react-native';
+import api from '@/api/api';
 
 export default function BookDetailScreen() {
-  // รับ params ที่ส่งมาจาก HomeScreen
-  const { book } = useLocalSearchParams<{ book: string }>();
+  const router = useRouter();
+  const { book: bookString } = useLocalSearchParams<{ book: string }>();
+  const initialBook: Book | null = bookString ? JSON.parse(bookString) : null;
 
-  // parse กลับมาเป็น object
-  const parsedBook: Book | null = book ? JSON.parse(book) : null;
-
-  const theme = Colors['light'];
-
-  // Mock data สำหรับข้อมูลเพิ่มเติม
-  const [bookDetails, setBookDetails] = useState({
-    isbn: '978-0-7352-1129-2',
-    pages: 320,
-    publisher: 'Avery Publishing',
-    publishYear: 2018,
-    category: 'Self-Development',
-    language: 'English',
-    rating: 4.8,
-    reviews: 1250,
-    dateAdded: '15 ก.ค. 2024',
-    dateStarted: parsedBook?.status === 'reading' ? '20 ก.ค. 2024' : null,
-    dateFinished: parsedBook?.status === 'finished' ? '5 ส.ค. 2024' : null,
-    currentPage: parsedBook?.status === 'reading' ? 156 : null,
-    notes: 'หนังสือดีมาก เปลี่ยนวิธีคิดเรื่องการสร้างนิสัยได้จริง',
-    tags: ['Productivity', 'Habits', 'Psychology', 'Self-Help']
-  });
-
+  const [book, setBook] = useState<Book | null>(initialBook);
+  const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
 
-  if (!parsedBook) {
+  useFocusEffect(
+    useCallback(() => {
+      const fetchBookDetails = async () => {
+        if (!initialBook?.id) {
+          setLoading(false);
+          return;
+        }
+        setLoading(true);
+        try {
+          const response = await api.get('/books');
+          const latestBook = response.data.find((b: Book) => b.id === initialBook.id);
+          if (latestBook) {
+            setBook(latestBook);
+          } else {
+            Alert.alert('ไม่พบข้อมูล', 'หนังสือเล่มนี้อาจถูกลบไปแล้ว', [{ text: 'ตกลง', onPress: () => router.back() }]);
+          }
+        } catch (error) {
+          console.error('Failed to fetch book details:', error);
+          Alert.alert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลล่าสุดของหนังสือได้');
+        } finally {
+          setLoading(false);
+        }
+      };
+      fetchBookDetails();
+    }, [initialBook?.id, router])
+  );
+  
+  if (loading || !book) {
     return (
-      <View style={styles.errorContainer}>
-        <ThemedText style={styles.errorTitle}>ไม่พบข้อมูลหนังสือ</ThemedText>
-        <ThemedText style={styles.errorText}>กรุณาลองใหม่อีกครั้ง</ThemedText>
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#D4A574" />
       </View>
     );
   }
 
   const getStatusInfo = (status: Book['status']) => {
     switch (status) {
-      case 'not_read':
-        return { color: '#FFE4B5', textColor: '#D2691E', icon: '⭐', label: 'ยังไม่ได้อ่าน' };
-      case 'reading':
-        return { color: '#E6F3FF', textColor: '#1E90FF', icon: '📖', label: 'กำลังอ่าน' };
-      case 'finished':
-        return { color: '#E8F5E8', textColor: '#228B22', icon: '✅', label: 'อ่านจบแล้ว' };
-      default:
-        return { color: '#F5F5F5', textColor: '#666666', icon: '📚', label: 'ไม่ระบุ' };
+      case 'not_read': return { color: '#FFE4B5', textColor: '#D2691E', icon: '⭐', label: 'ยังไม่ได้อ่าน' };
+      case 'reading': return { color: '#E6F3FF', textColor: '#1E90FF', icon: '📖', label: 'กำลังอ่าน' };
+      case 'finished': return { color: '#E8F5E8', textColor: '#228B22', icon: '✅', label: 'อ่านจบแล้ว' };
+      default: return { color: '#F5F5F5', textColor: '#666666', icon: '📚', label: 'ไม่ระบุ' };
     }
   };
 
-  const statusInfo = getStatusInfo(parsedBook.status);
+  const statusInfo = getStatusInfo(book.status);
 
   const handleStatusChange = () => {
-    const statusOptions = [
+    const statusOptions: { label: string; value: Book['status'] }[] = [
       { label: 'ยังไม่ได้อ่าน', value: 'not_read' },
       { label: 'กำลังอ่าน', value: 'reading' },
       { label: 'อ่านจบแล้ว', value: 'finished' }
@@ -78,7 +81,17 @@ export default function BookDetailScreen() {
       [
         ...statusOptions.map(option => ({
           text: option.label,
-          onPress: () => Alert.alert('อัปเดตสำเร็จ', `เปลี่ยนสถานะเป็น "${option.label}" แล้ว`)
+          onPress: async () => {
+            try {
+              const updatedBookData = { ...book, status: option.value };
+              await api.put(`/books/${book.id}`, updatedBookData);
+              setBook(updatedBookData);
+              Alert.alert('อัปเดตสำเร็จ', `เปลี่ยนสถานะเป็น "${option.label}" แล้ว`);
+            } catch (error) {
+              console.error('Failed to update status:', error);
+              Alert.alert('ผิดพลาด', 'ไม่สามารถอัปเดตสถานะได้');
+            }
+          }
         })),
         { text: 'ยกเลิก', style: 'cancel' }
       ]
@@ -89,10 +102,10 @@ export default function BookDetailScreen() {
     setIsFavorite(!isFavorite);
     Alert.alert(
       isFavorite ? 'ลบจากรายการโปรด' : 'เพิ่มในรายการโปรด',
-      `${parsedBook.title} ${isFavorite ? 'ถูกลบจาก' : 'ถูกเพิ่มใน'}รายการโปรดแล้ว`
+      `${book.title} ${isFavorite ? 'ถูกลบจาก' : 'ถูกเพิ่มใน'}รายการโปรดแล้ว`
     );
   };
-
+  
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -121,140 +134,15 @@ export default function BookDetailScreen() {
       >
         {/* Book Title & Author */}
         <View style={styles.titleSection}>
-          <ThemedText style={styles.bookTitle}>{parsedBook.title}</ThemedText>
-          <ThemedText style={styles.bookAuthor}>โดย {parsedBook.author}</ThemedText>
+          <ThemedText style={styles.bookTitle}>{book.title}</ThemedText>
+          <ThemedText style={styles.bookAuthor}>โดย {book.author}</ThemedText>
           
-          {/* Status Badge */}
           <View style={[styles.statusBadge, { backgroundColor: statusInfo.color }]}>
             <ThemedText style={[styles.statusText, { color: statusInfo.textColor }]}>
               {statusInfo.icon} {statusInfo.label}
             </ThemedText>
           </View>
         </View>
-
-        {/* Reading Progress (only for reading books) */}
-        {parsedBook.status === 'reading' && bookDetails.currentPage && (
-          <View style={styles.progressSection}>
-            <ThemedText style={styles.sectionTitle}>ความคืบหน้าการอ่าน</ThemedText>
-            <View style={styles.progressCard}>
-              <View style={styles.progressInfo}>
-                <ThemedText style={styles.progressNumber}>
-                  {bookDetails.currentPage}/{bookDetails.pages}
-                </ThemedText>
-                <ThemedText style={styles.progressLabel}>หน้า</ThemedText>
-              </View>
-              <View style={styles.progressBarContainer}>
-                <View style={styles.progressBarBackground}>
-                  <View style={[
-                    styles.progressBarFill, 
-                    { width: `${(bookDetails.currentPage / bookDetails.pages) * 100}%` }
-                  ]} />
-                </View>
-                <ThemedText style={styles.progressPercentage}>
-                  {Math.round((bookDetails.currentPage / bookDetails.pages) * 100)}%
-                </ThemedText>
-              </View>
-            </View>
-          </View>
-        )}
-
-        {/* Book Information */}
-        <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>ข้อมูลหนังสือ</ThemedText>
-          <View style={styles.infoCard}>
-            <View style={styles.infoRow}>
-              <ThemedText style={styles.infoLabel}>📖 จำนวนหน้า</ThemedText>
-              <ThemedText style={styles.infoValue}>{bookDetails.pages} หน้า</ThemedText>
-            </View>
-            <View style={styles.infoRow}>
-              <ThemedText style={styles.infoLabel}>🏢 สำนักพิมพ์</ThemedText>
-              <ThemedText style={styles.infoValue}>{bookDetails.publisher}</ThemedText>
-            </View>
-            <View style={styles.infoRow}>
-              <ThemedText style={styles.infoLabel}>📅 ปีที่พิมพ์</ThemedText>
-              <ThemedText style={styles.infoValue}>{bookDetails.publishYear}</ThemedText>
-            </View>
-            <View style={styles.infoRow}>
-              <ThemedText style={styles.infoLabel}>📚 หมวดหมู่</ThemedText>
-              <ThemedText style={styles.infoValue}>{bookDetails.category}</ThemedText>
-            </View>
-            <View style={styles.infoRow}>
-              <ThemedText style={styles.infoLabel}>🌐 ภาษา</ThemedText>
-              <ThemedText style={styles.infoValue}>{bookDetails.language}</ThemedText>
-            </View>
-            <View style={styles.infoRow}>
-              <ThemedText style={styles.infoLabel}>🔢 ISBN</ThemedText>
-              <ThemedText style={styles.infoValue}>{bookDetails.isbn}</ThemedText>
-            </View>
-          </View>
-        </View>
-
-        {/* Rating & Reviews */}
-        <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>คะแนนและรีวิว</ThemedText>
-          <View style={styles.ratingCard}>
-            <View style={styles.ratingSection}>
-              <View style={styles.ratingDisplay}>
-                <ThemedText style={styles.ratingNumber}>{bookDetails.rating}</ThemedText>
-                <View style={styles.starsContainer}>
-                  {[1, 2, 3, 4, 5].map(star => (
-                    <ThemedText key={star} style={styles.star}>
-                      {star <= Math.floor(bookDetails.rating) ? '⭐' : '☆'}
-                    </ThemedText>
-                  ))}
-                </View>
-              </View>
-              <ThemedText style={styles.reviewCount}>
-                {bookDetails.reviews.toLocaleString()} รีวิว
-              </ThemedText>
-            </View>
-          </View>
-        </View>
-
-        {/* Reading Dates */}
-        <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>วันที่สำคัญ</ThemedText>
-          <View style={styles.datesCard}>
-            <View style={styles.dateRow}>
-              <ThemedText style={styles.dateLabel}>📅 วันที่เพิ่ม</ThemedText>
-              <ThemedText style={styles.dateValue}>{bookDetails.dateAdded}</ThemedText>
-            </View>
-            {bookDetails.dateStarted && (
-              <View style={styles.dateRow}>
-                <ThemedText style={styles.dateLabel}>📖 วันที่เริ่มอ่าน</ThemedText>
-                <ThemedText style={styles.dateValue}>{bookDetails.dateStarted}</ThemedText>
-              </View>
-            )}
-            {bookDetails.dateFinished && (
-              <View style={styles.dateRow}>
-                <ThemedText style={styles.dateLabel}>✅ วันที่อ่านจบ</ThemedText>
-                <ThemedText style={styles.dateValue}>{bookDetails.dateFinished}</ThemedText>
-              </View>
-            )}
-          </View>
-        </View>
-
-        {/* Tags */}
-        <View style={styles.section}>
-          <ThemedText style={styles.sectionTitle}>แท็ก</ThemedText>
-          <View style={styles.tagsContainer}>
-            {bookDetails.tags.map((tag, index) => (
-              <View key={index} style={styles.tag}>
-                <ThemedText style={styles.tagText}>{tag}</ThemedText>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Notes */}
-        {bookDetails.notes && (
-          <View style={styles.section}>
-            <ThemedText style={styles.sectionTitle}>บันทึกส่วนตัว</ThemedText>
-            <View style={styles.notesCard}>
-              <ThemedText style={styles.notesText}>{bookDetails.notes}</ThemedText>
-            </View>
-          </View>
-        )}
 
         {/* Action Buttons */}
         <View style={styles.actionSection}>
@@ -266,17 +154,16 @@ export default function BookDetailScreen() {
           </TouchableOpacity>
 
           <View style={styles.secondaryButtonsRow}>
-            <TouchableOpacity style={styles.secondaryButton}>
+            <TouchableOpacity 
+              style={styles.secondaryButton} 
+              onPress={() => router.push({ pathname: '/(tabs)/ManageBookScreen', params: { bookToEdit: JSON.stringify(book) }})}
+            >
               <ThemedText style={styles.secondaryButtonText}>✏️ แก้ไข</ThemedText>
             </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryButton}>
               <ThemedText style={styles.secondaryButtonText}>📝 เพิ่มโน๊ต</ThemedText>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.shareButton}>
-            <ThemedText style={styles.shareButtonText}>📤 แบ่งปัน</ThemedText>
-          </TouchableOpacity>
         </View>
 
         <View style={styles.bottomPadding} />
@@ -290,27 +177,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FEF9C3',
   },
-
-  // Error State
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   errorContainer: {
     flex: 1,
-    backgroundColor: '#FEF9C3',
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
   },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#8B4513',
-    marginBottom: 8,
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#A0522D',
-  },
-
-  // Header
   headerContainer: {
     backgroundColor: '#F4E99B',
     paddingTop: Platform.OS === 'ios' ? 60 : 40,
@@ -358,8 +234,6 @@ const styles = StyleSheet.create({
   favoriteIcon: {
     fontSize: 16,
   },
-
-  // Scroll Container
   scrollContainer: {
     flex: 1,
   },
@@ -367,8 +241,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 20,
   },
-
-  // Title Section
   titleSection: {
     alignItems: 'center',
     marginBottom: 24,
@@ -395,61 +267,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-
-  // Progress Section
-  progressSection: {
-    marginBottom: 20,
-  },
-  progressCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  progressInfo: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  progressNumber: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#8B4513',
-  },
-  progressLabel: {
-    fontSize: 16,
-    color: '#A0522D',
-    marginLeft: 8,
-  },
-  progressBarContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  progressBarBackground: {
-    flex: 1,
-    height: 8,
-    backgroundColor: '#F4E99B',
-    borderRadius: 4,
-    marginRight: 12,
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#D4A574',
-    borderRadius: 4,
-  },
-  progressPercentage: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#8B4513',
-    minWidth: 40,
-  },
-
-  // Sections
   section: {
     marginBottom: 20,
   },
@@ -459,8 +276,6 @@ const styles = StyleSheet.create({
     color: '#8B4513',
     marginBottom: 12,
   },
-
-  // Info Card
   infoCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
@@ -492,106 +307,6 @@ const styles = StyleSheet.create({
     flex: 1,
     textAlign: 'right',
   },
-
-  // Rating Card
-  ratingCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  ratingSection: {
-    alignItems: 'center',
-  },
-  ratingDisplay: {
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  ratingNumber: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#8B4513',
-    marginBottom: 8,
-  },
-  starsContainer: {
-    flexDirection: 'row',
-    gap: 2,
-  },
-  star: {
-    fontSize: 16,
-  },
-  reviewCount: {
-    fontSize: 14,
-    color: '#A0522D',
-  },
-
-  // Dates Card
-  datesCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  dateRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  dateLabel: {
-    fontSize: 14,
-    color: '#A0522D',
-  },
-  dateValue: {
-    fontSize: 14,
-    color: '#8B4513',
-    fontWeight: '500',
-  },
-
-  // Tags
-  tagsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tag: {
-    backgroundColor: '#D4A574',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  tagText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-
-  // Notes Card
-  notesCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  notesText: {
-    fontSize: 16,
-    color: '#8B4513',
-    lineHeight: 24,
-  },
-
-  // Action Section
   actionSection: {
     gap: 12,
   },
@@ -634,25 +349,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#D4A574',
   },
-  shareButton: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#F4E99B',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  shareButtonText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#8B4513',
-  },
-
   bottomPadding: {
     height: 20,
   },

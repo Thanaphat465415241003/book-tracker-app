@@ -1,5 +1,6 @@
 import { ThemedText } from '@/components/themed-text';
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import {
     Alert,
     Platform,
@@ -9,38 +10,83 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
+import api from '@/api/api';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function EditProfileScreen() {
-  const [name, setName] = useState('ชื่อผู้ใช้');
-  const [email, setEmail] = useState('user@example.com');
+  const router = useRouter();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [bio, setBio] = useState('');
   const [birthDate, setBirthDate] = useState('');
-  const [readingGoal, setReadingGoal] = useState('12');
+  const [readingGoal, setReadingGoal] = useState('');
   const [favoriteGenre, setFavoriteGenre] = useState('');
   const [location, setLocation] = useState('');
 
-  const handleSave = () => {
-    if (!name.trim()) {
-      Alert.alert('กรุณากรอกชื่อ');
-      return;
-    }
-    if (!email.trim()) {
-      Alert.alert('กรุณากรอกอีเมล');
+  // ดึงข้อมูลโปรไฟล์เมื่อเปิดหน้า
+  useFocusEffect(
+    useCallback(() => {
+      const fetchProfile = async () => {
+        try {
+          const { data } = await api.get('/users/profile');
+          setName(data.name || '');
+          setEmail(data.email || '');
+          setPhone(data.phone || '');
+          setBio(data.bio || '');
+          setBirthDate(data.birthDate || '');
+          setReadingGoal(data.readingGoal?.toString() || '');
+          setFavoriteGenre(data.favoriteGenre || '');
+          setLocation(data.location || '');
+        } catch (error) {
+          console.error('Failed to fetch profile', error);
+          Alert.alert('ผิดพลาด', 'ไม่สามารถดึงข้อมูลโปรไฟล์ได้');
+        }
+      };
+      fetchProfile();
+    }, [])
+  );
+
+  const handleSave = async () => {
+    if (!name.trim() || !email.trim()) {
+      Alert.alert('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อและอีเมล');
       return;
     }
     
-    Alert.alert('บันทึกสำเร็จ', 'ข้อมูลโปรไฟล์ของคุณได้รับการบันทึกแล้ว', [
-      { text: 'ตกลง' }
-    ]);
+    try {
+        const profileData = {
+            name,
+            phone,
+            bio,
+            birthDate,
+            readingGoal: Number(readingGoal) || 0,
+            favoriteGenre,
+            location
+        };
+        await api.put('/users/profile', profileData);
+
+        Alert.alert('บันทึกสำเร็จ', 'ข้อมูลโปรไฟล์ของคุณได้รับการบันทึกแล้ว', [
+            { text: 'ตกลง', onPress: () => router.back() }
+        ]);
+    } catch (error) {
+        console.error('Failed to update profile', error);
+        Alert.alert('ผิดพลาด', 'ไม่สามารถบันทึกข้อมูลได้');
+    }
+  };
+
+  const handleLogout = async () => {
+    Alert.alert('ออกจากระบบ', 'คุณต้องการออกจากระบบใช่หรือไม่?', [
+        { text: 'ยกเลิก', style: 'cancel'},
+        { text: 'ตกลง', style: 'destructive', onPress: async () => {
+            await AsyncStorage.removeItem('userToken');
+            router.replace('/(auth)/login');
+        }}
+    ])
   };
 
   const handleChangePhoto = () => {
-    Alert.alert('เปลี่ยนรูปโปรไฟล์', 'เลือกวิธีการเปลี่ยนรูปโปรไฟล์', [
-      { text: 'ถ่าย���ูป' },
-      { text: 'เลือกจากคลัง' },
-      { text: 'ยกเลิก', style: 'cancel' }
-    ]);
+    Alert.alert('เปลี่ยนรูปโปรไฟล์', 'ฟังก์ชันนี้ยังไม่เปิดใช้งาน');
   };
 
   return (

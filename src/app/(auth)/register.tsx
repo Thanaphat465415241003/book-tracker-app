@@ -2,7 +2,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
+import api from '@/api/api'; // 👈 1. Import api instance
 
 export default function RegisterScreen() {
   const [email, setEmail] = useState('');
@@ -10,20 +11,34 @@ export default function RegisterScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const router = useRouter();
 
+  // 👇 2. แก้ไขฟังก์ชัน handleRegister ทั้งหมด
   const handleRegister = async () => {
-    if (!email || !password) {
-      alert('กรุณากรอกข้อมูลให้ครบ');
+    if (!email || !password || !confirmPassword) {
+      Alert.alert('ข้อผิดพลาด', 'กรุณากรอกข้อมูลให้ครบทุกช่อง');
       return;
     }
     if (password !== confirmPassword) {
-      alert('รหัสผ่านไม่ตรงกัน');
+      Alert.alert('ข้อผิดพลาด', 'รหัสผ่านและยืนยันรหัสผ่านไม่ตรงกัน');
       return;
     }
 
-    // ตัวอย่าง: บันทึกลง AsyncStorage (จริงๆ ควรใช้ API)
-    await AsyncStorage.setItem('isLoggedIn', 'true');
-    // นำทางไปหน้า Tabs (Home)
-    router.replace(`/(tabs)/HomeScreen`);
+    try {
+      // 3. ส่ง request ไปยัง Backend API
+      const response = await api.post('/users/register', { email, password });
+
+      if (response.data && response.data.token) {
+        // 4. บันทึก Token แล้วนำทางไปหน้า Home
+        await AsyncStorage.setItem('userToken', response.data.token);
+        router.replace(`/(tabs)/HomeScreen`);
+      }
+    } catch (error: any) {
+      // 5. จัดการ Error กรณีสมัครไม่สำเร็จ (เช่น อีเมลซ้ำ)
+      console.error(error.response?.data || error.message);
+      Alert.alert(
+        'สมัครสมาชิกไม่สำเร็จ', 
+        error.response?.data?.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง'
+      );
+    }
   };
 
   return (

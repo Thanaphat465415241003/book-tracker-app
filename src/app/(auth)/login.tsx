@@ -2,22 +2,36 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View, Alert } from 'react-native';
+import api from '@/api/api'; //  1. Import api instance ที่เราสร้างไว้
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');       // เก็บค่า email
   const [password, setPassword] = useState(''); // เก็บค่า password
   const router = useRouter();
 
+  //  2. แก้ไขฟังก์ชัน handleLogin ทั้งหมด
   const handleLogin = async () => {
-    // ตรวจสอบ email/password (ตัวอย่าง: email=user, password=1234)
-    if (email === 'user' && password === '1234') {
-      // บันทึกสถานะล็อกอิน
-      await AsyncStorage.setItem('isLoggedIn', 'true');
-      // นำทางไปหน้า Tabs (Home)
-      router.replace(`/(tabs)/HomeScreen`);
-    } else {
-      alert('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+    if (!email || !password) {
+        Alert.alert('ข้อผิดพลาด', 'กรุณากรอกอีเมลและรหัสผ่าน');
+        return;
+    }
+    
+    try {
+      // 3. ส่ง request ไปยัง Backend API
+      const response = await api.post('/users/login', { email, password });
+
+      if (response.data && response.data.token) {
+        // 4. บันทึก Token ที่ได้จาก Backend ลงใน AsyncStorage
+        await AsyncStorage.setItem('userToken', response.data.token);
+        
+        // 5. นำทางไปหน้า Home Screen
+        router.replace(`/(tabs)/HomeScreen`);
+      }
+    } catch (error: any) {
+      // 6. จัดการ Error กรณีล็อกอินไม่สำเร็จ
+      console.error(error.response?.data || error.message);
+      Alert.alert('ล็อกอินไม่สำเร็จ', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     }
   };
 
@@ -38,6 +52,8 @@ export default function LoginScreen() {
               placeholderTextColor="#9CA3AF"
               value={email}
               onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
             />
           </View>
           

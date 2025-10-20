@@ -3,9 +3,9 @@ import { Colors } from '@/constants/theme';
 import { Book, RootStackParamList, RootTabParamList } from '@/types/navigation';
 import { Picker } from '@react-native-picker/picker';
 import { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
-import { CompositeScreenProps } from '@react-navigation/native';
+import { CompositeScreenProps, useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   Alert,
   FlatList,
@@ -17,6 +17,7 @@ import {
   useColorScheme,
   View,
 } from 'react-native';
+import api from '@/api/api'; //  1. Import api
 
 type Props = CompositeScreenProps<
   BottomTabScreenProps<RootTabParamList, 'Manage'>,
@@ -27,17 +28,30 @@ export default function ManageBookScreen({ navigation }: Props) {
   const colorScheme = useColorScheme() || 'light';
   const theme = Colors[colorScheme];
 
-  const [books, setBooks] = useState<Book[]>([
-    { id: '1', title: 'Atomic Habits', author: 'James Clear', status: 'reading' },
-    { id: '2', title: 'Deep Work', author: 'Cal Newport', status: 'not_read' },
-  ]);
-
+  const [books, setBooks] = useState<Book[]>([]); //  2. เริ่มต้นด้วย Array ว่าง
   const [modalVisible, setModalVisible] = useState(false);
   const [editingBook, setEditingBook] = useState<Book | null>(null);
   const [title, setTitle] = useState('');
   const [author, setAuthor] = useState('');
   const [status, setStatus] = useState<Book['status']>('not_read');
   const [filter, setFilter] = useState<'all' | Book['status']>('all');
+
+  //  3. ดึงข้อมูลหนังสือจาก API เมื่อหน้าจอนี้ถูกเปิด (focus)
+  const fetchBooks = useCallback(async () => {
+    try {
+      const response = await api.get('/books');
+      setBooks(response.data);
+    } catch (error) {
+      console.error("Failed to fetch books:", error);
+      Alert.alert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลหนังสือได้');
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchBooks();
+    }, [fetchBooks])
+  );
 
   const openAddModal = () => {
     setEditingBook(null);
@@ -55,35 +69,50 @@ export default function ManageBookScreen({ navigation }: Props) {
     setModalVisible(true);
   };
 
-  const saveBook = () => {
+  //  4. แก้ไขฟังก์ชัน Save ให้เรียก API
+  const saveBook = async () => {
     if (!title || !author) {
-      Alert.alert('กรุณากรอกชื่อหนังสือและผู้แต่ง');
+      Alert.alert('ข้อมูลไม่ครบ', 'กรุณากรอกชื่อหนังสือและผู้แต่ง');
       return;
     }
 
-    if (editingBook) {
-      setBooks(prev =>
-        prev.map(b => (b.id === editingBook.id ? { ...b, title, author, status } : b))
-      );
-    } else {
-      const newBook: Book = { id: Date.now().toString(), title, author, status };
-      setBooks(prev => [newBook, ...prev]);
+    try {
+      if (editingBook) {
+        // Update book
+        await api.put(`/books/${editingBook.id}`, { title, author, status });
+      } else {
+        // Add new book
+        await api.post('/books', { title, author, status });
+      }
+      setModalVisible(false);
+      fetchBooks(); // Re-fetch books after saving
+    } catch (error) {
+      console.error("Failed to save book:", error);
+      Alert.alert('ผิดพลาด', 'ไม่สามารถบันทึกหนังสือได้');
     }
-
-    setModalVisible(false);
   };
 
+  //  5. แก้ไขฟังก์ชัน Delete ให้เรียก API
   const deleteBook = (bookId: string) => {
     Alert.alert('ลบหนังสือ', 'คุณแน่ใจหรือไม่ว่าจะลบหนังสือเล่มนี้?', [
       { text: 'ยกเลิก', style: 'cancel' },
       {
         text: 'ลบ',
         style: 'destructive',
-        onPress: () => setBooks(prev => prev.filter(b => b.id !== bookId)),
+        onPress: async () => {
+          try {
+            await api.delete(`/books/${bookId}`);
+            fetchBooks(); // Re-fetch books after deleting
+          } catch (error) {
+            console.error("Failed to delete book:", error);
+            Alert.alert('ผิดพลาด', 'ไม่สามารถลบหนังสือได้');
+          }
+        },
       },
     ]);
   };
-
+  
+  // ... (โค้ดส่วน UI และ Helper Functions ที่เหลือไม่ต้องแก้ไข)
   const getStatusColor = (status: Book['status']) => {
     switch (status) {
       case 'not_read':
