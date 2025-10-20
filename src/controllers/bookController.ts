@@ -41,7 +41,6 @@ export const addBook = async (req: AuthRequest, res: Response) => {
 
 export const updateBook = async (req: AuthRequest, res: Response) => {
     const { id } = req.params;
-    const { title, author, status, publisher, category } = req.body;
 
     try {
         const bookRef = booksCollection.doc(id);
@@ -54,11 +53,32 @@ export const updateBook = async (req: AuthRequest, res: Response) => {
         if (doc.data()?.userId !== req.user.id) {
             return res.status(401).json({ message: 'User not authorized' });
         }
+        
+        // 1. สร้าง Object ว่างสำหรับเก็บข้อมูลที่จะอัปเดต
+        const { title, author, status, publisher, category } = req.body;
+        const updatedData: { [key: string]: any } = {};
 
-        await bookRef.update({ title, author, status, publisher, category });
-        res.status(200).json({ id: doc.id, ... (await bookRef.get()).data() });
+        // 2. เช็คและเพิ่มเฉพาะ field ที่มีค่า (ไม่ใช่ undefined)
+        if (title !== undefined) updatedData.title = title;
+        if (author !== undefined) updatedData.author = author;
+        if (status !== undefined) updatedData.status = status;
+        if (publisher !== undefined) updatedData.publisher = publisher;
+        if (category !== undefined) updatedData.category = category;
+        
+        // 3. ตรวจสอบว่ามีข้อมูลส่งมาให้อัปเดตหรือไม่
+        if (Object.keys(updatedData).length === 0) {
+            return res.status(400).json({ message: 'No valid data provided for update' });
+        }
+
+        // 4. อัปเดตด้วยข้อมูลที่ผ่านการกรองแล้ว
+        await bookRef.update(updatedData);
+
+        const updatedDoc = await bookRef.get();
+        res.status(200).json({ id: updatedDoc.id, ...updatedDoc.data() });
+
     } catch (error) {
-        res.status(500).json({ message: 'Server Error' });
+        console.error("Error updating book:", error); // Log error จริงๆ ที่ฝั่ง server
+        res.status(500).json({ message: 'Server Error while updating book' });
     }
 };
 
